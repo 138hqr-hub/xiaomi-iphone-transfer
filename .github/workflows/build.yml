@@ -1,0 +1,132 @@
+name: Build Standalone Xiaomi Transfer APK
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. 檢出程式碼
+        uses: actions/checkout@v4
+
+      - name: 2. 設定 JDK 17 環境
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 3. 設定 Gradle 8.7 編譯器
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+
+      - name: 4. 自動生成 Android 專案結構與設定檔
+        run: |
+          mkdir -p app/src/main/java/com/xiaomi/transfer
+          cp MainActivity.kt app/src/main/java/com/xiaomi/transfer/MainActivity.kt
+
+          cat << 'EOF' > settings.gradle
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "XiaomiTransfer"
+          include(":app")
+          EOF
+
+          cat << 'EOF' > app/build.gradle
+          plugins {
+              id 'com.android.application' version '8.3.2'
+              id 'org.jetbrains.kotlin.android' version '1.9.23'
+          }
+
+          android {
+              namespace 'com.xiaomi.transfer'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId "com.xiaomi.transfer"
+                  minSdk 26
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = '17'
+              }
+          }
+          EOF
+
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+              <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+              <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+              <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
+              <application
+                  android:label="小米⇄iPhone互傳"
+                  android:icon="@android:mipmap/sym_def_app_icon"
+                  android:requestLegacyExternalStorage="true"
+                  android:usesCleartextTraffic="true"
+                  android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:configChanges="orientation|screenSize|keyboardHidden">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+      - name: 5. 編譯並自動簽章獨立 APK
+        run: |
+          gradle assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk Xiaomi_iPhone_Transfer.apk
+
+      - name: 6. 上傳至 GitHub Actions Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Xiaomi-iPhone-Transfer-APK
+          path: Xiaomi_iPhone_Transfer.apk
+
+      - name: 7. 自動發佈至 GitHub Releases (手機可直接點選下載 .apk)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "v1.0.${{ github.run_number }}" Xiaomi_iPhone_Transfer.apk \
+            --title "小米 ⇄ iPhone 雙向互傳獨立 App (v1.0.${{ github.run_number }})" \
+            --notes "自動編譯完成的獨立 Android APK 安裝檔。請在小米手機直接點擊下方 Xiaomi_iPhone_Transfer.apk 下載安裝即可，完全不需依賴 Pydroid 3！"
